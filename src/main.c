@@ -6,9 +6,13 @@ int main() {
 
     while ((cmdline = read_cmd(PROMPT, stdin)) != NULL) {
         if ((arglist = tokenize(cmdline)) != NULL) {
-            execute(arglist);
+            // Check and run built-in commands in the parent process first.
+            // Only call execute() (which forks a child) if it is an external command.
+            if (!handle_builtin(arglist)) {
+                execute(arglist);
+            }
 
-            // Free the memory allocated by tokenize()
+            // Free the dynamically allocated argument list
             for (int i = 0; arglist[i] != NULL; i++) {
                 free(arglist[i]);
             }
@@ -17,6 +21,6 @@ int main() {
         free(cmdline);
     }
 
-    printf("\nShell exited.\n");
+    printf("\n");
     return 0;
 }
