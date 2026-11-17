@@ -4,19 +4,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 
 int main() {
     char* cmdline;
     char** arglist;
 
-    while ((cmdline = read_cmd(PROMPT, stdin)) != NULL) {
-        // Ignore empty lines so blank Enters are not saved in history
+    using_history();
+    init_readline();
+
+    while ((cmdline = readline(PROMPT)) != NULL) {
+        // Skip empty lines without adding to history
         if (cmdline[0] == '\0') {
             free(cmdline);
             continue;
         }
 
-        // Step A: Handle !n re-execution BEFORE adding to history or tokenizing
+        // Handle !n re-execution BEFORE adding to history or tokenizing
         if (cmdline[0] == '!') {
             if (!isdigit((unsigned char)cmdline[1])) {
                 fprintf(stderr, "Invalid history reference: %s\n", cmdline);
@@ -28,7 +33,6 @@ int main() {
             errno = 0;
             long n = strtol(cmdline + 1, &endptr, 10);
 
-            // Allow optional trailing whitespace, reject trailing letters like !2abc
             while (*endptr == ' ' || *endptr == '\t') {
                 endptr++;
             }
@@ -46,7 +50,6 @@ int main() {
                 continue;
             }
 
-            // Replace "!n" with a fresh heap copy of the retrieved command
             char* resolved = strdup(saved_cmd);
             free(cmdline);
             if (resolved == NULL) {
@@ -57,10 +60,10 @@ int main() {
             printf("%s\n", cmdline);
         }
 
-        // Step B: Save the valid command into history
+        // Add to Readline's history (for Up/Down arrows) AND our Feature-3 history
+        add_history(cmdline);
         add_to_history(cmdline);
 
-        // Step C: Tokenize and execute normally (works for both built-ins and externals)
         if ((arglist = tokenize(cmdline)) != NULL) {
             if (!handle_builtin(arglist)) {
                 execute(arglist);
@@ -75,6 +78,7 @@ int main() {
     }
 
     free_history();
+    clear_history();
     printf("\n");
     return 0;
 }

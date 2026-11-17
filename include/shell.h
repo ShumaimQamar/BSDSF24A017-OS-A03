@@ -21,7 +21,7 @@ void print_history(void);
 const char* get_history_command(int n);
 void free_history(void);
 
-
+void init_readline(void);
 
 char* read_cmd(char* prompt, FILE* fp);
 char** tokenize(char* cmdline);
