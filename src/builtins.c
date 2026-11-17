@@ -1,3 +1,5 @@
+#include "shell.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +12,7 @@ int handle_builtin(char** arglist) {
 
     // 1. exit: Terminate the shell gracefully
     if (strcmp(arglist[0], "exit") == 0) {
+	free_history();
         printf("Exiting myshell...\n");
         exit(0);
     }
@@ -37,7 +40,8 @@ int handle_builtin(char** arglist) {
         printf("  cd <dir>  - Change the current working directory\n");
         printf("  exit      - Terminate the shell\n");
         printf("  help      - Display this help message\n");
-        printf("  jobs      - List active background jobs\n");
+       printf("  history   - Display command history\n");
+	 printf("  jobs      - List active background jobs\n");
         return 1;
     }
 
@@ -46,6 +50,13 @@ int handle_builtin(char** arglist) {
         printf("Job control not yet implemented.\n");
         return 1;
     }
+
+	// 5. history: Display stored commands
+    if (strcmp(arglist[0], "history") == 0) {
+        print_history();
+        return 1;
+    }
+
 
     return 0; // Not a built-in command; proceed to external execution
 }

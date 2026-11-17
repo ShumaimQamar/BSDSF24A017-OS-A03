@@ -15,6 +15,14 @@
 #define PROMPT "FCIT> "
 
 // Function prototypes
+#define HISTORY_SIZE 20
+void add_to_history(const char* cmd);
+void print_history(void);
+const char* get_history_command(int n);
+void free_history(void);
+
+
+
 char* read_cmd(char* prompt, FILE* fp);
 char** tokenize(char* cmdline);
 int execute(char** arglist);
