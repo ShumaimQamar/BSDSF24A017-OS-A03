@@ -7,6 +7,33 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 
+char* pad_operators(const char* cmd) {
+    size_t len = strlen(cmd);
+    char* padded = malloc(len * 3 + 1);
+    if (padded == NULL) {
+        return NULL;
+    }
+
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (cmd[i] == '>' && cmd[i + 1] == '>') {
+            padded[j++] = ' ';
+            padded[j++] = '>';
+            padded[j++] = '>';
+            padded[j++] = ' ';
+            i++;
+        } else if (cmd[i] == '<' || cmd[i] == '>' || cmd[i] == '|') {
+            padded[j++] = ' ';
+            padded[j++] = cmd[i];
+            padded[j++] = ' ';
+        } else {
+            padded[j++] = cmd[i];
+        }
+    }
+    padded[j] = '\0';
+    return padded;
+}
+
 int main() {
     char* cmdline;
     char** arglist;
@@ -15,7 +42,6 @@ int main() {
     init_readline();
 
     while ((cmdline = readline(PROMPT)) != NULL) {
-        // Skip empty lines without adding to history
         if (cmdline[0] == '\0') {
             free(cmdline);
             continue;
@@ -60,19 +86,22 @@ int main() {
             printf("%s\n", cmdline);
         }
 
-        // Add to Readline's history (for Up/Down arrows) AND our Feature-3 history
         add_history(cmdline);
         add_to_history(cmdline);
 
-        if ((arglist = tokenize(cmdline)) != NULL) {
-            if (!handle_builtin(arglist)) {
-                execute(arglist);
-            }
+        char* normalized = pad_operators(cmdline);
+        if (normalized != NULL) {
+            if ((arglist = tokenize(normalized)) != NULL) {
+                if (!handle_builtin(arglist)) {
+                    execute(arglist);
+                }
 
-            for (int i = 0; arglist[i] != NULL; i++) {
-                free(arglist[i]);
+                for (int i = 0; arglist[i] != NULL; i++) {
+                    free(arglist[i]);
+                }
+                free(arglist);
             }
-            free(arglist);
+            free(normalized);
         }
         free(cmdline);
     }
