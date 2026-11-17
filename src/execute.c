@@ -102,16 +102,15 @@ static int setup_io_and_args(char** arglist, int start, int end, char** clean_ar
     return (argc > 0) ? 0 : -1;
 }
 
-void execute(char** arglist) {
+int execute(char** arglist, int background, const char* raw_cmd) {
     if (arglist == NULL || arglist[0] == NULL) {
-        return;
+        return 0;
     }
 
     if (validate_pipeline(arglist) != 0) {
-        return;
+        return -1;
     }
 
-    // Count how many commands are separated by '|'
     int num_cmds = 1;
     int total_tokens = 0;
     while (arglist[total_tokens] != NULL) {
@@ -132,10 +131,9 @@ void execute(char** arglist) {
         free(seg_end);
         free(pids);
         free(pipes);
-        return;
+        return -1;
     }
 
-    // Record [start, end) token boundaries for each command in the pipeline
     int cmd_idx = 0;
     seg_start[0] = 0;
     for (int i = 0; i < total_tokens; i++) {
@@ -147,7 +145,6 @@ void execute(char** arglist) {
     }
     seg_end[cmd_idx] = total_tokens;
 
-    // Create all (num_cmds - 1) pipes before forking children
     for (int i = 0; i < num_cmds - 1; i++) {
         if (pipe(pipes[i]) < 0) {
             perror("pipe");
@@ -159,11 +156,10 @@ void execute(char** arglist) {
             free(seg_end);
             free(pids);
             free(pipes);
-            return;
+            return -1;
         }
     }
 
-    // Fork and launch each command in the pipeline
     for (int i = 0; i < num_cmds; i++) {
         pids[i] = fork();
         if (pids[i] < 0) {
@@ -172,7 +168,11 @@ void execute(char** arglist) {
         }
 
         if (pids[i] == 0) {
-            // Connect stdin to previous pipe's read end (if not first command)
+            // Isolate background jobs from terminal Ctrl+C (SIGINT)
+            if (background) {
+                setpgid(0, 0);
+            }
+
             if (i > 0) {
                 if (dup2(pipes[i - 1][0], STDIN_FILENO) < 0) {
                     perror("dup2");
@@ -180,7 +180,6 @@ void execute(char** arglist) {
                 }
             }
 
-            // Connect stdout to current pipe's write end (if not last command)
             if (i < num_cmds - 1) {
                 if (dup2(pipes[i][1], STDOUT_FILENO) < 0) {
                     perror("dup2");
@@ -188,13 +187,11 @@ void execute(char** arglist) {
                 }
             }
 
-            // Close all pipe descriptors in the child so EOF works properly
             for (int j = 0; j < num_cmds - 1; j++) {
                 close(pipes[j][0]);
                 close(pipes[j][1]);
             }
 
-            // Apply any file redirections (<, >, >>) and strip operators from argv
             char* clean_argv[MAXARGS];
             if (setup_io_and_args(arglist, seg_start[i], seg_end[i], clean_argv) != 0) {
                 _exit(1);
@@ -206,15 +203,23 @@ void execute(char** arglist) {
         }
     }
 
-    // Parent closes all pipe descriptors and waits for every child to finish
+    // Parent closes all pipe ends
     for (int j = 0; j < num_cmds - 1; j++) {
         close(pipes[j][0]);
         close(pipes[j][1]);
     }
 
-    for (int i = 0; i < num_cmds; i++) {
-        if (pids[i] > 0) {
-            waitpid(pids[i], NULL, 0);
+    if (background) {
+        // Track the background job and return immediately without blocking
+        if (pids[num_cmds - 1] > 0) {
+            add_job(pids[num_cmds - 1], raw_cmd);
+        }
+    } else {
+        // Foreground execution: block until all pipeline stages finish
+        for (int i = 0; i < num_cmds; i++) {
+            if (pids[i] > 0) {
+                waitpid(pids[i], NULL, 0);
+            }
         }
     }
 
@@ -222,4 +227,5 @@ void execute(char** arglist) {
     free(seg_end);
     free(pids);
     free(pipes);
+    return 0;
 }

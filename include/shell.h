@@ -1,6 +1,8 @@
 #ifndef SHELL_H
 #define SHELL_H
 
+#include <sys/types.h>
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -13,6 +15,7 @@
 #define MAXARGS 64
 #endif
 
+#define MAX_JOBS 64
 
 #define MAX_LEN 512
 #define ARGLEN 30
@@ -28,10 +31,16 @@ void free_history(void);
 void init_readline(void);
 
 char* pad_operators(const char* cmd);
-void execute(char** arglist);
+int execute(char** arglist, int background, const char* raw_cmd);
 
 char* read_cmd(char* prompt, FILE* fp);
 char** tokenize(char* cmdline);
 int handle_builtin(char** arglist);
+
+void init_signals(void);
+void add_job(pid_t pid, const char* cmd);
+void print_jobs(void);
+void cleanup_done_jobs(void);
+void free_jobs(void);
 
 #endif // SHELL_H

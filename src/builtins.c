@@ -13,6 +13,7 @@ int handle_builtin(char** arglist) {
     // 1. exit: Terminate the shell gracefully
     if (strcmp(arglist[0], "exit") == 0) {
 	free_history();
+	free_jobs();
         printf("Exiting myshell...\n");
         exit(0);
     }
@@ -47,7 +48,7 @@ int handle_builtin(char** arglist) {
 
     // 4. jobs: Placeholder until Feature-6
     if (strcmp(arglist[0], "jobs") == 0) {
-        printf("Job control not yet implemented.\n");
+	print_jobs();
         return 1;
     }
 

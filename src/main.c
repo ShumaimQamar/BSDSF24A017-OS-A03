@@ -22,7 +22,7 @@ char* pad_operators(const char* cmd) {
             padded[j++] = '>';
             padded[j++] = ' ';
             i++;
-        } else if (cmd[i] == '<' || cmd[i] == '>' || cmd[i] == '|') {
+        } else if (cmd[i] == '<' || cmd[i] == '>' || cmd[i] == '|' || cmd[i] == '&') {
             padded[j++] = ' ';
             padded[j++] = cmd[i];
             padded[j++] = ' ';
@@ -34,14 +34,24 @@ char* pad_operators(const char* cmd) {
     return padded;
 }
 
+static void free_arglist(char** arglist) {
+    for (int i = 0; arglist[i] != NULL; i++) {
+        free(arglist[i]);
+    }
+    free(arglist);
+}
+
 int main() {
     char* cmdline;
     char** arglist;
 
     using_history();
     init_readline();
+    init_signals();
 
     while ((cmdline = readline(PROMPT)) != NULL) {
+        cleanup_done_jobs();
+
         if (cmdline[0] == '\0') {
             free(cmdline);
             continue;
@@ -92,14 +102,40 @@ int main() {
         char* normalized = pad_operators(cmdline);
         if (normalized != NULL) {
             if ((arglist = tokenize(normalized)) != NULL) {
-                if (!handle_builtin(arglist)) {
-                    execute(arglist);
+                int count = 0;
+                int syntax_err = 0;
+                while (arglist[count] != NULL) {
+                    count++;
                 }
 
-                for (int i = 0; arglist[i] != NULL; i++) {
-                    free(arglist[i]);
+                // Check for misplaced '&' anywhere before the final token
+                for (int i = 0; i < count - 1; i++) {
+                    if (strcmp(arglist[i], "&") == 0) {
+                        fprintf(stderr, "myshell: syntax error near unexpected token '&'\n");
+                        syntax_err = 1;
+                        break;
+                    }
                 }
-                free(arglist);
+
+                int background = 0;
+                if (!syntax_err && count > 0 && strcmp(arglist[count - 1], "&") == 0) {
+                    if (count == 1) {
+                        fprintf(stderr, "myshell: syntax error near unexpected token '&'\n");
+                        syntax_err = 1;
+                    } else {
+                        background = 1;
+                        free(arglist[count - 1]);
+                        arglist[count - 1] = NULL;
+                    }
+                }
+
+                if (!syntax_err && arglist[0] != NULL) {
+                    if (!handle_builtin(arglist)) {
+                        execute(arglist, background, cmdline);
+                    }
+                }
+
+                free_arglist(arglist);
             }
             free(normalized);
         }
@@ -107,6 +143,7 @@ int main() {
     }
 
     free_history();
+    free_jobs();
     clear_history();
     printf("\n");
     return 0;
