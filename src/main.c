@@ -14,6 +14,7 @@ typedef enum {
     STATE_DONE
 } IfParseState;
 
+// Pad <, >, >>, |, and & outside of quotes
 char* pad_operators(const char* cmd) {
     size_t len = strlen(cmd);
     char* padded = malloc(len * 3 + 1);
@@ -22,14 +23,21 @@ char* pad_operators(const char* cmd) {
     }
 
     size_t j = 0;
+    char quote = 0;
     for (size_t i = 0; i < len; i++) {
-        if (cmd[i] == '>' && cmd[i + 1] == '>') {
+        if (quote == 0 && (cmd[i] == '\'' || cmd[i] == '"')) {
+            quote = cmd[i];
+            padded[j++] = cmd[i];
+        } else if (quote != 0 && cmd[i] == quote) {
+            quote = 0;
+            padded[j++] = cmd[i];
+        } else if (quote == 0 && cmd[i] == '>' && cmd[i + 1] == '>') {
             padded[j++] = ' ';
             padded[j++] = '>';
             padded[j++] = '>';
             padded[j++] = ' ';
             i++;
-        } else if (cmd[i] == '<' || cmd[i] == '>' || cmd[i] == '|' || cmd[i] == '&') {
+        } else if (quote == 0 && (cmd[i] == '<' || cmd[i] == '>' || cmd[i] == '|' || cmd[i] == '&')) {
             padded[j++] = ' ';
             padded[j++] = cmd[i];
             padded[j++] = ' ';
@@ -41,6 +49,61 @@ char* pad_operators(const char* cmd) {
     return padded;
 }
 
+// Quote-aware tokenizer so strings like MESSAGE="Hello, World!" remain a single token
+static char** tokenize_quote_aware(const char* line) {
+    char** arglist = malloc(MAXARGS * sizeof(char*));
+    if (arglist == NULL) {
+        perror("malloc");
+        return NULL;
+    }
+
+    int argc = 0;
+    size_t i = 0;
+    size_t len = strlen(line);
+
+    while (i < len && argc < MAXARGS - 1) {
+        while (i < len && (line[i] == ' ' || line[i] == '\t')) {
+            i++;
+        }
+        if (i >= len) {
+            break;
+        }
+
+        char* tok = malloc(len - i + 1);
+        if (tok == NULL) {
+            perror("malloc");
+            break;
+        }
+
+        size_t t = 0;
+        char quote = 0;
+        while (i < len) {
+            if (quote == 0 && (line[i] == ' ' || line[i] == '\t')) {
+                break;
+            }
+            if (quote == 0 && (line[i] == '\'' || line[i] == '"')) {
+                quote = line[i];
+                tok[t++] = line[i++];
+            } else if (quote != 0 && line[i] == quote) {
+                quote = 0;
+                tok[t++] = line[i++];
+            } else {
+                tok[t++] = line[i++];
+            }
+        }
+        tok[t] = '\0';
+        arglist[argc++] = tok;
+    }
+
+    if (argc == 0) {
+        free(arglist);
+        return NULL;
+    }
+
+    arglist[argc] = NULL;
+    return arglist;
+}
+
 static void free_arglist(char** arglist) {
     for (int i = 0; arglist[i] != NULL; i++) {
         free(arglist[i]);
@@ -48,20 +111,208 @@ static void free_arglist(char** arglist) {
     free(arglist);
 }
 
-// Strip surrounding single or double quotes from tokenized arguments
-static void strip_quotes(char** arglist) {
+// Lookup variable in shell linked list first, then environment variables
+static const char* lookup_var_value(const char* name) {
+    const char* val = get_variable(name);
+    if (val != NULL) {
+        return val;
+    }
+    const char* env_val = getenv(name);
+    return (env_val != NULL) ? env_val : "";
+}
+
+// Allocate a new string with all $VAR and ${VAR} references expanded
+static char* expand_single_token(const char* tok) {
+    size_t cap = strlen(tok) + 32;
+    char* out = malloc(cap);
+    if (out == NULL) {
+        return NULL;
+    }
+
+    size_t out_len = 0;
+    char quote = 0;
+
+    for (size_t i = 0; tok[i] != '\0'; ) {
+        if (quote == 0 && (tok[i] == '\'' || tok[i] == '"')) {
+            quote = tok[i];
+            if (out_len + 2 > cap) {
+                cap *= 2;
+                char* tmp = realloc(out, cap);
+                if (!tmp) { free(out); return NULL; }
+                out = tmp;
+            }
+            out[out_len++] = tok[i++];
+            continue;
+        }
+        if (quote != 0 && tok[i] == quote) {
+            quote = 0;
+            if (out_len + 2 > cap) {
+                cap *= 2;
+                char* tmp = realloc(out, cap);
+                if (!tmp) { free(out); return NULL; }
+                out = tmp;
+            }
+            out[out_len++] = tok[i++];
+            continue;
+        }
+
+        // Expand $VARNAME or ${VARNAME} when not inside single quotes
+        if (tok[i] == '$' && quote != '\'') {
+            if (tok[i + 1] == '{') {
+                const char* end_brace = strchr(tok + i + 2, '}');
+                if (end_brace != NULL && end_brace > tok + i + 2) {
+                    size_t name_len = (size_t)(end_brace - (tok + i + 2));
+                    char* name = malloc(name_len + 1);
+                    if (name) {
+                        memcpy(name, tok + i + 2, name_len);
+                        name[name_len] = '\0';
+                        const char* val = lookup_var_value(name);
+                        size_t vlen = strlen(val);
+                        while (out_len + vlen + 1 > cap) {
+                            cap *= 2;
+                            char* tmp = realloc(out, cap);
+                            if (!tmp) { free(name); free(out); return NULL; }
+                            out = tmp;
+                        }
+                        memcpy(out + out_len, val, vlen);
+                        out_len += vlen;
+                        free(name);
+                    }
+                    i = (size_t)(end_brace - tok) + 1;
+                    continue;
+                }
+            } else if (isalpha((unsigned char)tok[i + 1]) || tok[i + 1] == '_') {
+                size_t start = i + 1;
+                size_t end = start;
+                while (isalnum((unsigned char)tok[end]) || tok[end] == '_') {
+                    end++;
+                }
+                size_t name_len = end - start;
+                char* name = malloc(name_len + 1);
+                if (name) {
+                    memcpy(name, tok + start, name_len);
+                    name[name_len] = '\0';
+                    const char* val = lookup_var_value(name);
+                    size_t vlen = strlen(val);
+                    while (out_len + vlen + 1 > cap) {
+                        cap *= 2;
+                        char* tmp = realloc(out, cap);
+                        if (!tmp) { free(name); free(out); return NULL; }
+                        out = tmp;
+                    }
+                    memcpy(out + out_len, val, vlen);
+                    out_len += vlen;
+                    free(name);
+                }
+                i = end;
+                continue;
+            }
+        }
+
+        if (out_len + 2 > cap) {
+            cap *= 2;
+            char* tmp = realloc(out, cap);
+            if (!tmp) { free(out); return NULL; }
+            out = tmp;
+        }
+        out[out_len++] = tok[i++];
+    }
+
+    out[out_len] = '\0';
+    return out;
+}
+
+// Pre-execution variable expansion across all tokens in arglist
+static void expand_variables(char** arglist) {
     for (int i = 0; arglist[i] != NULL; i++) {
-        size_t len = strlen(arglist[i]);
-        if (len >= 2 &&
-            ((arglist[i][0] == '"' && arglist[i][len - 1] == '"') ||
-             (arglist[i][0] == '\'' && arglist[i][len - 1] == '\''))) {
-            memmove(arglist[i], arglist[i] + 1, len - 2);
-            arglist[i][len - 2] = '\0';
+        if (strchr(arglist[i], '$') != NULL) {
+            char* expanded = expand_single_token(arglist[i]);
+            if (expanded != NULL) {
+                free(arglist[i]);
+                arglist[i] = expanded;
+            }
         }
     }
 }
 
-// Return pointer to first non-whitespace char and trim trailing whitespace in place
+// Remove balanced single or double quotes from a token
+static void strip_quotes_from_token(char* tok) {
+    size_t r = 0, w = 0;
+    char quote = 0;
+    while (tok[r] != '\0') {
+        if (quote == 0 && (tok[r] == '\'' || tok[r] == '"')) {
+            char q = tok[r];
+            if (strchr(tok + r + 1, q) != NULL) {
+                quote = q;
+                r++;
+                continue;
+            }
+        } else if (quote != 0 && tok[r] == quote) {
+            quote = 0;
+            r++;
+            continue;
+        }
+        tok[w++] = tok[r++];
+    }
+    tok[w] = '\0';
+}
+
+static void strip_quotes(char** arglist) {
+    for (int i = 0; arglist[i] != NULL; i++) {
+        strip_quotes_from_token(arglist[i]);
+    }
+}
+
+// Check if a token matches valid shell assignment syntax: VARNAME=value
+static int is_valid_assignment(const char* tok) {
+    const char* eq = strchr(tok, '=');
+    if (eq == NULL || eq == tok) {
+        return 0;
+    }
+
+    if (!isalpha((unsigned char)tok[0]) && tok[0] != '_') {
+        return 0;
+    }
+    for (const char* p = tok + 1; p < eq; p++) {
+        if (!isalnum((unsigned char)*p) && *p != '_') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+// Handle built-in variable assignment(s) without forking
+static int handle_variable_assignment(char** arglist) {
+    if (arglist == NULL || arglist[0] == NULL) {
+        return 0;
+    }
+
+    if (!is_valid_assignment(arglist[0])) {
+        return 0;
+    }
+
+    // Verify all tokens on this command are valid VAR=value assignments
+    for (int i = 1; arglist[i] != NULL; i++) {
+        if (!is_valid_assignment(arglist[i])) {
+            fprintf(stderr, "myshell: invalid assignment syntax near '%s'\n", arglist[i]);
+            return 1;
+        }
+    }
+
+    for (int i = 0; arglist[i] != NULL; i++) {
+        char* eq = strchr(arglist[i], '=');
+        size_t name_len = (size_t)(eq - arglist[i]);
+        char* name = malloc(name_len + 1);
+        if (name != NULL) {
+            memcpy(name, arglist[i], name_len);
+            name[name_len] = '\0';
+            set_variable(name, eq + 1);
+            free(name);
+        }
+    }
+    return 1;
+}
+
 static char* trim_line(char* str) {
     while (*str == ' ' || *str == '\t' || *str == '\r' || *str == '\n') {
         str++;
@@ -74,7 +325,6 @@ static char* trim_line(char* str) {
     return str;
 }
 
-// Check if a trimmed line starts with a given keyword followed by whitespace or end-of-line
 static int starts_with_keyword(const char* trimmed, const char* kw) {
     size_t klen = strlen(kw);
     if (strncmp(trimmed, kw, klen) != 0) {
@@ -110,7 +360,6 @@ static void free_line_list(char** list, int count) {
     free(list);
 }
 
-// Forward declaration so execute_line() and process_if_block() can support nested ifs
 static int execute_line(const char* raw_line);
 
 static int process_if_block(const char* first_line) {
@@ -121,7 +370,6 @@ static int process_if_block(const char* first_line) {
     }
 
     char* trimmed = trim_line(line_copy);
-    // Extract condition command right after "if"
     char* cond_start = trimmed + 2;
     while (*cond_start == ' ' || *cond_start == '\t') {
         cond_start++;
@@ -166,7 +414,6 @@ static int process_if_block(const char* first_line) {
         char* scan_copy = strdup(next_line);
         char* t = trim_line(scan_copy);
 
-        // Skip blank lines and comment lines inside the block
         if (t[0] == '\0' || t[0] == '#') {
             free(scan_copy);
             free(next_line);
@@ -225,7 +472,6 @@ static int process_if_block(const char* first_line) {
 
     int result_status = 1;
     if (!syntax_error) {
-        // Execute the condition command and inspect its exit status (0 = true, non-zero = false)
         int cond_status = execute_line(cond_cmd);
 
         if (cond_status == 0) {
@@ -260,7 +506,6 @@ static int execute_line(const char* raw_line) {
         return 0;
     }
 
-    // Intercept multi-line if-then-else-fi control blocks
     if (starts_with_keyword(trimmed, "if")) {
         int status = process_if_block(trimmed);
         free(copy);
@@ -270,9 +515,21 @@ static int execute_line(const char* raw_line) {
     int status = 0;
     char* normalized = pad_operators(trimmed);
     if (normalized != NULL) {
-        char** arglist = tokenize(normalized);
+        char** arglist = tokenize_quote_aware(normalized);
         if (arglist != NULL) {
+            // Step 1: Expand $VARNAME references before stripping quotes or executing
+            expand_variables(arglist);
+
+            // Step 2: Strip surrounding quotes from arguments and variable values
             strip_quotes(arglist);
+
+            // Step 3: Check if this command is a VARNAME=value assignment
+            if (handle_variable_assignment(arglist)) {
+                free_arglist(arglist);
+                free(normalized);
+                free(copy);
+                return 0;
+            }
 
             int count = 0;
             int syntax_err = 0;
@@ -383,6 +640,7 @@ int main() {
 
     free_history();
     free_jobs();
+    free_variables();
     clear_history();
     printf("\n");
     return 0;

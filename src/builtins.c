@@ -13,6 +13,7 @@ int handle_builtin(char** arglist, int* exit_status) {
     if (strcmp(arglist[0], "exit") == 0) {
         free_history();
         free_jobs();
+        free_variables();
         printf("Exiting myshell...\n");
         exit(0);
     }
@@ -45,6 +46,7 @@ int handle_builtin(char** arglist, int* exit_status) {
         printf("  help      - Display this help message\n");
         printf("  history   - Display command history\n");
         printf("  jobs      - List active background jobs\n");
+        printf("  set       - Display all defined shell variables\n");
         if (exit_status) *exit_status = 0;
         return 1;
     }
@@ -63,5 +65,13 @@ int handle_builtin(char** arglist, int* exit_status) {
         return 1;
     }
 
+    // 6. set: Print all defined shell variables
+    if (strcmp(arglist[0], "set") == 0) {
+        print_variables();
+        if (exit_status) *exit_status = 0;
+        return 1;
+    }
+
     return 0;
 }
+

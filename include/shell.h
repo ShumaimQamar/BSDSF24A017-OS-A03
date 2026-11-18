@@ -45,4 +45,9 @@ int handle_builtin(char** arglist, int* exit_status);
 int execute(char** arglist, int background, const char* raw_cmd);
 char* pad_operators(const char* cmd);
 
+void set_variable(const char* name, const char* value);
+const char* get_variable(const char* name);
+void print_variables(void);
+void free_variables(void);
+
 #endif // SHELL_H
