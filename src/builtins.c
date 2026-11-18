@@ -39,17 +39,17 @@ int handle_builtin(char** arglist, int* exit_status) {
     }
 
     // 3. help: List supported built-in commands
-    if (strcmp(arglist[0], "help") == 0) {
-        printf("myshell built-in commands:\n");
-        printf("  cd <dir>  - Change the current working directory\n");
-        printf("  exit      - Terminate the shell\n");
-        printf("  help      - Display this help message\n");
-        printf("  history   - Display command history\n");
-        printf("  jobs      - List active background jobs\n");
-        printf("  set       - Display all defined shell variables\n");
-        if (exit_status) *exit_status = 0;
-        return 1;
-    }
+if (strcmp(arglist[0], "help") == 0) {
+     printf("myshell built-in commands:\n");
+     printf("  cd <dir>   - Change the current working directory\n");
+     printf("  exit       - Terminate the shell\n");
+     printf("  help       - Display this help message\n");
+     printf("  history    - Display command history (use !n to re-run command n)\n");
+     printf("  jobs       - List active background jobs\n");
+     printf("  set        - Display all defined shell variables (assign via VAR=value)\n");
+     if (exit_status) *exit_status = 0;
+     return 1;
+ }
 
     // 4. jobs: List active background jobs
     if (strcmp(arglist[0], "jobs") == 0) {
