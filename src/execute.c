@@ -108,7 +108,7 @@ int execute(char** arglist, int background, const char* raw_cmd) {
     }
 
     if (validate_pipeline(arglist) != 0) {
-        return -1;
+        return 1;
     }
 
     int num_cmds = 1;
@@ -131,7 +131,7 @@ int execute(char** arglist, int background, const char* raw_cmd) {
         free(seg_end);
         free(pids);
         free(pipes);
-        return -1;
+        return 1;
     }
 
     int cmd_idx = 0;
@@ -156,7 +156,7 @@ int execute(char** arglist, int background, const char* raw_cmd) {
             free(seg_end);
             free(pids);
             free(pipes);
-            return -1;
+            return 1;
         }
     }
 
@@ -168,7 +168,6 @@ int execute(char** arglist, int background, const char* raw_cmd) {
         }
 
         if (pids[i] == 0) {
-            // Isolate background jobs from terminal Ctrl+C (SIGINT)
             if (background) {
                 setpgid(0, 0);
             }
@@ -199,26 +198,28 @@ int execute(char** arglist, int background, const char* raw_cmd) {
 
             execvp(clean_argv[0], clean_argv);
             perror(clean_argv[0]);
-            _exit(1);
+            _exit(127);
         }
     }
 
-    // Parent closes all pipe ends
     for (int j = 0; j < num_cmds - 1; j++) {
         close(pipes[j][0]);
         close(pipes[j][1]);
     }
 
+    int final_status = 0;
     if (background) {
-        // Track the background job and return immediately without blocking
         if (pids[num_cmds - 1] > 0) {
             add_job(pids[num_cmds - 1], raw_cmd);
         }
     } else {
-        // Foreground execution: block until all pipeline stages finish
         for (int i = 0; i < num_cmds; i++) {
             if (pids[i] > 0) {
-                waitpid(pids[i], NULL, 0);
+                int status = 0;
+                waitpid(pids[i], &status, 0);
+                if (i == num_cmds - 1) {
+                    final_status = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+                }
             }
         }
     }
@@ -227,5 +228,5 @@ int execute(char** arglist, int background, const char* raw_cmd) {
     free(seg_end);
     free(pids);
     free(pipes);
-    return 0;
+    return final_status;
 }

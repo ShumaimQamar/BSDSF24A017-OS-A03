@@ -31,16 +31,18 @@ void free_history(void);
 void init_readline(void);
 
 char* pad_operators(const char* cmd);
-int execute(char** arglist, int background, const char* raw_cmd);
 
 char* read_cmd(char* prompt, FILE* fp);
 char** tokenize(char* cmdline);
-int handle_builtin(char** arglist);
 
 void init_signals(void);
 void add_job(pid_t pid, const char* cmd);
 void print_jobs(void);
 void cleanup_done_jobs(void);
 void free_jobs(void);
+
+int handle_builtin(char** arglist, int* exit_status);
+int execute(char** arglist, int background, const char* raw_cmd);
+char* pad_operators(const char* cmd);
 
 #endif // SHELL_H
